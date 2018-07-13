@@ -1,0 +1,58 @@
+SET SQL_SAFE_UPDATES = 0;
+
+SELECT * FROM thinksys_dummy_dev.message;
+-- SCHEDULER TO UPDATE EMPLOYEE LEAVES 
+delimiter |
+CREATE EVENT employee_leaves_update
+    ON SCHEDULE AT CURRENT_TIMESTAMP
+    DO
+      BEGIN
+
+UPDATE thinksys_dummy_dev.`tabLeave Allocation`
+SET total_leaves_allocated=total_leaves_allocated+1.75,new_leaves_allocated=new_leaves_allocated+1.75 
+WHERE employee IN (SELECT employeeID FROM thinksys_dummy_dev.EmployeeLeavesRemainingView WHERE  Total_remaining_leaves<=28.25 AND employment_type='Full-Time');
+  
+UPDATE thinksys_dummy_dev.`tabLeave Allocation` 
+SET total_leaves_allocated=total_leaves_allocated+(SELECT (30-Total_remaining_leaves) FROM thinksys_dummy_dev.EmployeesLeaveRemaining where  employeeID=thinksys_dummy_dev.`tabLeave Allocation`.employee),
+new_leaves_allocated=new_leaves_allocated+(SELECT (30-Total_remaining_leaves) FROM thinksys_dummy_dev.EmployeesLeaveRemaining where employeeID=thinksys_dummy_dev.`tabLeave Allocation`.employee)
+where employee IN (SELECT employeeID FROM thinksys_dummy_dev.EmployeeLeavesRemainingView WHERE  Total_remaining_leaves>28.25  AND Total_remaining_leaves<30 AND employment_type='Full-Time');
+
+UPDATE thinksys_dummy_dev.`tabLeave Allocation`
+SET total_leaves_allocated=total_leaves_allocated+1,new_leaves_allocated=new_leaves_allocated+1
+WHERE employee IN (SELECT employeeID FROM thinksys_dummy_dev.EmployeeLeavesRemainingView WHERE employment_type='Probation');
+
+END |
+
+delimiter ;
+
+
+SELECT * FROM thinksys_dummy_dev.EmployeeLeavesRemainingView;
+
+SELECT * FROM thinksys_dummy_dev.leave_allocation;
+use thinksys_dummy_dev;
+
+CREATE VIEW EmployeeLeavesRemainingView AS 
+ SELECT distinct employeeTable.employee_name,leaveTable.employee AS employeeID,
+ (select year from `tabFiscal Year` where is_fiscal_year_closed='No') as Year,
+  IFNULL((select sum(total_leave_days) from thinksys_dummy_dev.`tabLeave Application` 
+       where employee= employeeTable.name 
+       and status='Approved' and docstatus=1 and leave_type='Earned Leave' and
+    fiscal_year=(select year from `tabFiscal Year` where is_fiscal_year_closed='No')), 0) as Total_leaves_taken,
+ 
+IFNULL((select sum(total_leaves_allocated) from thinksys_dummy_dev.`tabLeave Allocation` 
+where employee= employeeTable.name and docstatus=1 and
+ leave_type='Earned Leave' and 
+ fiscal_year=(select year from `tabFiscal Year` where is_fiscal_year_closed='No')), 0) as Total_earned_leaves_allocated,
+ 
+ IFNULL((select sum(total_leaves_allocated) from thinksys_dummy_dev.`tabLeave Allocation` where employee= employeeTable.name and docstatus=1 and
+ leave_type='Earned Leave' and
+ fiscal_year=(select year from `tabFiscal Year` where is_fiscal_year_closed='No')), 0)-IFNULL((select sum(total_leave_days) from thinksys_dummy_dev.`tabLeave Application` 
+ 
+ where employee= employeeTable.name and status='Approved' 
+ and docstatus=1 and  leave_type='Earned Leave' and
+ fiscal_year=(select year from `tabFiscal Year` where is_fiscal_year_closed='No')), 0) as Total_remaining_leaves,
+employeeTable.employment_type
+FROM thinksys_dummy_dev.`tabLeave Application` as leaveTable inner join thinksys_dummy_dev.`tabEmployee` as employeeTable on leaveTable.employee = employeeTable.name inner join `tabLeave Allocation` as leaveAllocationtab 
+on leaveAllocationtab.employee=employeeTable.name where employeeTable.status='active' AND employeeTable.resignation_letter_date IS NULL;
+
+

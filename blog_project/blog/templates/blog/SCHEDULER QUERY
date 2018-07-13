@@ -1,0 +1,94 @@
+SET SQL_SAFE_UPDATES = 0;
+-- SCHEDULER TO UPDATE EMPLOYEE LEAVES 
+delimiter |
+CREATE EVENT employee_leaves_update
+    ON SCHEDULE AT CURRENT_TIMESTAMP
+    DO
+      BEGIN
+
+      UPDATE thinksys_dummy_dev.`tabLeave Allocation`
+         SET total_leaves_allocated=total_leaves_allocated+1.75,new_leaves_allocated=new_leaves_allocated+1.75 
+         WHERE employee IN
+         (SELECT employeeID FROM thinksys_dummy_dev.EmployeeLeavesRemainingView
+	    WHERE  Total_remaining_leaves<=28.25 AND employment_type='Full-Time');
+  
+      UPDATE thinksys_dummy_dev.`tabLeave Allocation` 
+         SET total_leaves_allocated=total_leaves_allocated+
+	                            (SELECT (30-Total_remaining_leaves)
+		                    FROM thinksys_dummy_dev.EmployeesLeaveRemaining
+		                    WHERE  employeeID=thinksys_dummy_dev.`tabLeave Allocation`.employee),
+           
+            new_leaves_allocated=new_leaves_allocated+
+		                 (SELECT (30-Total_remaining_leaves)
+			         FROM thinksys_dummy_dev.EmployeesLeaveRemaining 
+				 WHERE employeeID=thinksys_dummy_dev.`tabLeave Allocation`.employee)
+          WHERE employee 
+             IN 
+               (SELECT employeeID FROM thinksys_dummy_dev.EmployeeLeavesRemainingView 
+				 WHERE  Total_remaining_leaves>28.25  AND Total_remaining_leaves<30 
+			     AND employment_type='Full-Time');
+
+      UPDATE thinksys_dummy_dev.`tabLeave Allocation`
+	  SET total_leaves_allocated=total_leaves_allocated+1,
+               new_leaves_allocated=new_leaves_allocated+1
+	   
+               WHERE employee 
+		 IN 
+                   (SELECT employeeID FROM
+                    thinksys_dummy_dev.EmployeeLeavesRemainingView
+                    WHERE employment_type='Probation');
+
+END |
+
+delimiter ;
+
+
+
+SELECT * FROM thinksys_dummy_dev.EmployeeLeavesRemainingView;
+
+SELECT * FROM thinksys_dummy_dev.leave_allocation;
+use thinksys_dummy_dev;
+
+CREATE VIEW EmployeeLeavesRemainingView AS 
+   SELECT distinct employeeTable.employee_name,
+          leaveTable.employee AS employeeID,
+            -- Current Fiscal Year
+          (SELECT year FROM `tabFiscal Year` WHERE is_fiscal_year_closed='No') AS Year,
+             -- Total leaves Taken
+          IFNULL((SELECT sum(total_leave_days) 
+		     FROM thinksys_dummy_dev.`tabLeave Application` 
+                     WHERE employee= employeeTable.name 
+                     AND status='Approved' AND docstatus=1
+                     AND leave_type='Earned Leave' AND
+                     fiscal_year=(SELECT year FROM `tabFiscal Year` WHERE is_fiscal_year_closed='No')), 0) AS Total_leaves_taken,
+           -- Total Earned Leaves
+          IFNULL((SELECT sum(total_leaves_allocated)
+		      FROM thinksys_dummy_dev.`tabLeave Allocation` 
+                      WHERE employee= employeeTable.name AND docstatus=1 AND
+                      leave_type='Earned Leave' AND 
+                      fiscal_year=(SELECT year
+				  FROM
+				   `tabFiscal Year` WHERE is_fiscal_year_closed='No')), 0) AS Total_earned_leaves_allocated,
+          -- Total_remaining Leaves
+         IFNULL((SELECT sum(total_leaves_allocated) 
+                   FROM thinksys_dummy_dev.`tabLeave Allocation`
+		   WHERE employee= employeeTable.name AND docstatus=1 AND
+                   leave_type='Earned Leave' AND
+                   fiscal_year=(SELECT year from `tabFiscal Year` WHERE is_fiscal_year_closed='No')), 0)
+           
+         -IFNULL((SELECTsum(total_leave_days) from thinksys_dummy_dev.`tabLeave Application` 
+                   WHERE 
+	           employee= employeeTable.name AND status='Approved'
+                   AND docstatus=1 AND  leave_type='Earned Leave' AND
+                  fiscal_year=(SELECT year from `tabFiscal Year` WHERE is_fiscal_year_closed='No')), 0) AS Total_remaining_leaves,
+         employeeTable.employment_type 
+   FROM        
+	   -- join table tabLeaveApplication,tabEmployee,tabLeaveAllocation
+		thinksys_dummy_dev.`tabLeave Application` AS leaveTable INNER JOIN thinksys_dummy_dev.`tabEmployee` AS employeeTable
+	        ON leaveTable.employee = employeeTable.name
+		INNER JOIN `tabLeave Allocation` AS leaveAllocationtab 
+                ON leaveAllocationtab.employee=employeeTable.name 
+   WHERE employeeTable.status='active' 
+		      AND employeeTable.resignation_letter_date IS NULL;
+
+
